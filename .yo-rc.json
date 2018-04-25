@@ -1,0 +1,18 @@
+{
+  "generator-videojs-plugin": {
+    "scope": "",
+    "name": "group-play",
+    "description": "",
+    "author": "brandonocasey <brandonocasey@gmail.com>",
+    "license": "mit",
+    "sass": true,
+    "ie8": false,
+    "docs": true,
+    "lang": true,
+    "husky": "lint",
+    "bcov": false,
+    "changelog": false,
+    "bower": false,
+    "ghooks": "lint"
+  }
+}
