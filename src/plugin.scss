@@ -1,9 +1,17 @@
 // Sass for videojs-group-play
+.video-js .vjs-group-play-button .vjs-icon-placeholder {
 
-.video-js {
-
-  // This class is added to the video.js element by the plugin by default.
-  &.vjs-group-play {
-    display: block;
-  }
+  cursor: pointer;
+  font-family: VideoJS;
+  font-weight: normal;
+  font-style: normal;
+  content: "\f10f";
+}
+// Switch to the exit icon when the player is in fullscreen
+.video-js .vjs-group-play-sharing .vjs-group-play-button .vjs-icon-placeholder {
+  cursor: pointer;
+  font-family: VideoJS;
+  font-weight: normal;
+  font-style: normal;
+  content: "\f115";
 }

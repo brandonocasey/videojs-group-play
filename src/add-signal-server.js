@@ -1,86 +1,76 @@
+/* eslint-disable no-console */
 const WebSocket = require('ws');
 const uuid = require('uuid');
-const peers = {
-  // url: [peers]
-};
+
+// a list of all sockets segmented by the
+// url that they are using.
+const urlSockets = {};
+
+// a list of all sockets
+const sockets = [];
 
 const handleMessage = function(ws, message) {
-  console.log('received: %s', message);
-  let req = '';
+  let clientMessage = '';
 
   try {
-    req = JSON.parse(message);
+    clientMessage = JSON.parse(message);
   } catch (e) {
     console.error('bad message', e);
     return;
   }
 
-  peers[req.data.url] = peers[req.data.url] || [];
+  console.log('recv from ' + ws.id + ' <- ' + clientMessage.type);
 
-  const urlPeers = peers[req.data.url];
-  let i = urlPeers.length;
+  if (clientMessage.type === 'start') {
+    ws.url = clientMessage.data.url;
+    ws.send({
+      type: 'start-ack',
+      data: {id: ws.id}
+    });
 
-  // remove invalid peers
-  while (i--) {
-    const p = urlPeers[i];
+    urlSockets[ws.url] = urlSockets[ws.url] || [];
+    urlSockets[ws.url].push(ws);
 
-    // remove invalid peer
-    if (p.ws.readyState === 2 || p.ws.readyState === 3) {
-      urlPeers.splice(i, 1);
+    console.log('Added peer ' + ws.id + ' for url ' + ws.url);
+
+    // if there is more then one peer, then we need to tell
+    // clients to connect to one another
+    if (urlSockets[ws.url].length > 1) {
+      // ex [1, 2, 3, 4] this will be at index 3 to start
+      let i = urlSockets[ws.url].length - 1;
+
+      while (i--) {
+        const peer = urlSockets[ws.url][i];
+
+        peer.send({type: 'add-peer', data: {id: ws.id}});
+      }
     }
+    return;
   }
 
-  if (req.type === 'start') {
-    const peer = {ws, id: uuid.v4()};
+  const peers = urlSockets[ws.url];
+  const peerWs = peers.filter((p) => p.id === clientMessage.data.id)[0];
 
-    urlPeers.push(peer);
-
-    ws.send(JSON.stringify({
-      type: 'start-ack',
-      data: {id: peer.id}
-    }));
-
-    if (urlPeers.length === 1) {
-      return;
-    }
-
-    urlPeers.forEach(function(p) {
-      if (p.ws === urlPeers[0].ws) {
-        return;
-      }
-
-      urlPeers[0].ws.send(JSON.stringify({
-        type: 'need-offer',
-        data: {to: p.id}
-      }));
-    });
-  } else if (req.type === 'offer') {
-    const offerPeer = urlPeers.filter((p) => p.id === req.data.to)[0];
-
-    offerPeer.ws.send(JSON.stringify({
+  // send the offer to the peer with the specifed id
+  if (clientMessage.type === 'offer') {
+    peerWs.send({
       type: 'offer',
-      data: {offer: req.data.offer, to: req.data.to, from: req.data.from}
-    }));
-  } else if (req.type === 'answer') {
-    const answerPeer = urlPeers.filter((p) => p.id === req.data.to)[0];
-
-    answerPeer.ws.send(JSON.stringify({
-      type: 'answer',
-      data: {answer: req.data.answer, to: req.data.to, from: req.data.from}
-    }));
-  } else if (req.type === 'candidate') {
-    // send candidates to all other peers
-    urlPeers.forEach((p) => {
-      if (p.ws === ws) {
-        return;
-      }
-
-      p.ws.send(JSON.stringify({
-        type: 'candidate',
-        data: {candidate: req.data.candidate}
-      }));
+      data: {offer: clientMessage.data.offer, id: ws.id}
     });
 
+  // send the answer to the peer with the specified id
+  } else if (clientMessage.type === 'answer') {
+    peerWs.send({
+      type: 'answer',
+      data: {answer: clientMessage.data.answer, id: ws.id}
+    });
+
+  // send the candidates to the peer with the specifed id
+  } else if (clientMessage.type === 'candidate') {
+    peerWs.send({
+      type: 'candidate',
+      data: {candidate: clientMessage.data.candidate, id: ws.id}
+    });
   }
 };
 
@@ -93,17 +83,40 @@ const addSignalServer = function(server) {
     console.log('Listening for WebSockets on ws://' + host.address + ':' + host.port);
   });
 
-  wss.on('connection', function connection(ws) {
+  wss.on('connection', function connection(ws, req) {
+    ws.id = uuid.v4();
+    ws.url = req.headers.origin;
+    const oldSend = ws.send;
+
+    ws.send = function(message) {
+      console.log('send to   ' + ws.id + ' -> ' + message.type);
+      message = JSON.stringify(message);
+
+      return oldSend.call(ws, message);
+    };
+
+    sockets.push(ws);
 
     ws.on('message', function(message) {
       handleMessage(ws, message);
     });
 
     ws.on('close', function(message) {
-      // TODO
-      console.log('some ws closed');
-    });
+      console.log('Removed peer ' + ws.id + ' for url ' + ws.url);
 
+      sockets.splice(sockets.indexOf(ws), 1);
+      // if the client has sent a start already start
+      if (ws.url) {
+        urlSockets[ws.url].splice(urlSockets[ws.url].indexOf(ws), 1);
+        // remove the peer from client lists
+        urlSockets[ws.url].forEach(function(w) {
+          w.send({
+            type: 'remove-peer',
+            data: {id: ws.id}
+          });
+        });
+      }
+    });
   });
 };
 
